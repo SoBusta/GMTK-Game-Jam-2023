@@ -35,13 +35,14 @@ public class PlayerMovement : MonoBehaviour
     private bool leftArrowButton;
     private bool downArrowButton;
 
-    private bool holdingJumpButton;
+    public bool holdingJumpButton;
     private bool holdingDashButton;
 
-    private bool pressedJumpButton;
-    private bool pressedDashButton;
+    public bool pressedJumpButton;
+    public bool pressedDashButton;
 
     private bool mouseLeftButton;
+    private bool mouseRightButton;
 
     public Vector2 mouseDirection;
     public float mouseDirectionX; // Detects in which direction the player is going discretly in the x-axis (-1, 0, 1)
@@ -56,10 +57,10 @@ public class PlayerMovement : MonoBehaviour
     // Jump Variables
     [SerializeField] private float jumpForce = 10f;
     [SerializeField] private float numberOfJumps = 2f;
-    [SerializeField] private float jumpCount;
+    public float jumpCount;
     bool hasJumped;
 
-    [SerializeField] private float coyoteTimeThreshold = 0.2f;
+    [SerializeField] public float coyoteTimeThreshold = 0.2f;
     private float coyoteTimeCounter;
     private bool canCoyote;
 
@@ -78,6 +79,7 @@ public class PlayerMovement : MonoBehaviour
     float DirectionalValue;
 
     // Dash
+    public bool ableToDash = false;
     [SerializeField] float DashVelocity = 13f;
 
     [SerializeField] private float DashTime = 0.5f;
@@ -86,6 +88,10 @@ public class PlayerMovement : MonoBehaviour
     private bool isDashing;
     private Vector2 DashDirection;
     private bool hasDashed;
+    private float isDashingGlitchCounter;
+    [SerializeField] private float isDashingGlitchValidationDuration = 1f;
+    public bool dashSpeedGlitch;
+    [SerializeField] private float jumpDashSpeedCoef = 4.5f;
 
     // Crouch
     [SerializeField] float TopCrouchSpeed = 5f;
@@ -95,19 +101,29 @@ public class PlayerMovement : MonoBehaviour
     [SerializeField] float DecelerationForceAir = 3f;
 
     // Grab
-    [SerializeField] private Transform grabPoint;
-    [SerializeField] private Transform rayPoint;
+    [SerializeField] private Vector3 relativeGrabPoint = new Vector3(0.684f, -0.06f, 0f);
+    [SerializeField] private Vector3 relativeRayPoint = new Vector3(0.185f, -0.088f, 0);
+    private Vector3 grabPoint;
+    private Vector3 rayPoint;
     [SerializeField] private float rayDistance = 1f;
+    private RaycastHit2D hitInfo;
 
     private GameObject grabbedObject;
+    bool isGrabbing;
+
+    [SerializeField] private float throwCooldownDuration = 0.5f;
+    private float throwCooldownCounter;
+    private bool throwCooldown;
 
     // Glitches
-    [SerializeField] bool NoBoundInSpeedGlitch;
-    [SerializeField] bool MomentumGainGlitch;
-    [SerializeField] bool CoyoteTimeGlitch;
-    [SerializeField] bool DoubleJumpGlitch;
-    [SerializeField] bool JumpDashMomentumGlitch;
-    [SerializeField] bool PhaseThroughWallsGlitch;
+    public bool NoBoundInSpeedGlitch;
+    public bool MomentumGainGlitch;
+    public bool CoyoteTimeGlitch;
+    public bool DoubleJumpGlitch;
+    public bool JumpDashMomentumGlitch;
+    public bool PhaseThroughWallsGlitch;
+    public bool BoxFlyGlitch;
+    public bool BoxSquish;
 
     // Clipping / Collisions
     [SerializeField] float CanClipThroughSpeed = 50f;
@@ -115,12 +131,21 @@ public class PlayerMovement : MonoBehaviour
     [SerializeField] float AfterClipVelocity = 6f;
 
     // Jump-Dash Glitch
-    bool JumpDashActive;
+    public bool JumpDashActive;
     [SerializeField] float DecelerationJumpDash = 0.5f;
 
     // Grab Glitch
     bool thrownObject;
     Vector2 thrownReaction;
+
+    // Grab Glitch Squish
+    bool leftObject;
+    float leftDirection;
+    float ClipDistanceSquish = 2f;
+
+    [SerializeField] private float leftObjectThresholdDuration = 0.75f;
+    private float leftObjectThresholdCounter;
+    private bool leftObjectThreshold;
 
     public static bool isDead;
 
@@ -152,6 +177,10 @@ public class PlayerMovement : MonoBehaviour
 
     public bool canMove;
 
+    [SerializeField] private List<Transform> spawnPoints;
+    private bool hasGrabGlitched;
+
+    [SerializeField] private Dialog dialog;
 
     // Start is called before the first frame update
     void Start()
@@ -176,6 +205,8 @@ public class PlayerMovement : MonoBehaviour
         canFlip = true;
 
         canMove = true;
+
+        StartCoroutine(dialog.Type());
     }
 
     // Update is called once per frame
@@ -193,6 +224,7 @@ public class PlayerMovement : MonoBehaviour
         holdingDashButton = Input.GetKey(KeyCode.LeftShift);
 
         mouseLeftButton = Input.GetMouseButton(0);
+        mouseRightButton = Input.GetMouseButton(1);
 
         // The cursorPosition variable now contains the position of the cursor in screen coordinates
         Vector2 cursorPosition = Input.mousePosition;
@@ -270,14 +302,42 @@ public class PlayerMovement : MonoBehaviour
         jumpBufferTimeCounter = Timer(jumpBufferTimeCounter);
         canJumpBuffer = CheckCondition(jumpBufferTimeCounter, canJumpBuffer);
 
+        // Throw Cooldown
+        throwCooldownCounter = Timer(throwCooldownCounter);
+        throwCooldown = CheckCondition(throwCooldownCounter, throwCooldown);
+
+        // Squish
+        leftObjectThresholdCounter = Timer(leftObjectThresholdCounter);
+        leftObjectThreshold = CheckCondition(leftObjectThresholdCounter, leftObjectThreshold);
+
+
         // Dash
-        if (onGround && !holdingDashButton)
+        if (dashSpeedGlitch && holdingDashButton)
+        {
+            canDash = true;
+            hasDashed = false;
+            isDashingGlitchCounter += Time.deltaTime;
+
+            if (isDashingGlitchCounter > isDashingGlitchValidationDuration)
+            {
+                isDashingGlitchCounter = 0;
+                StartCoroutine(NextLevelTransition(10));
+                canMove = false;
+                JumpDashMomentumGlitch = true;
+            }
+        }
+        else if (onGround && !holdingDashButton)
         {
             canDash = true;
             hasDashed = false;
         }
+        else
+        {
+            isDashingGlitchCounter = 0;
+        }
+
         // Jump-Dash Glitch
-        if (onGround)
+        if (onGround && JumpDashMomentumGlitch)
         {
             JumpDashActive = false;
         }
@@ -285,16 +345,16 @@ public class PlayerMovement : MonoBehaviour
         DashTimeCounter = Timer(DashTimeCounter);
         isDashing = CheckCondition(DashTimeCounter, isDashing);
 
-        anim.SetBool("isRunning", leftArrowButton || rightArrowButton);
+        anim.SetBool("isRunning", leftArrowButton || rightArrowButton && canMove);
         anim.SetBool("grounded", onGround);
-        anim.SetBool("isFalling", Player.velocity.y < 0 && !onGround);
-        anim.SetBool("isRising", Player.velocity.y > 0 && !onGround);
+        anim.SetBool("isFalling", Player.velocity.y < 0.1f && !onGround);
+        anim.SetBool("isRising", Player.velocity.y > 0.1f && !onGround);
 
         if (onDeathLayer && !isDead)
         {
-            StartCoroutine(Death(0.6f));
+            StartCoroutine(Death(0.6f, false));
         }
-            
+
     }
 
     /*void OnDrawGizmos()
@@ -322,63 +382,142 @@ public class PlayerMovement : MonoBehaviour
     // Fixed Update is called every interval
     void FixedUpdate()
     {
+
+        // Updating Grab and Ray position
+        grabPoint = PolarVector3(1.2f, Mathf.Atan2(mouseDirection.y, mouseDirection.x)) + transform.position;
+        rayPoint = PolarVector3(0.2f, Mathf.Atan2(mouseDirection.y, mouseDirection.x)) + transform.position;
+
         // Get Direction Player wants to go
-        if (leftArrowButton && !rightArrowButton)
+        if (!isGrabbing)
         {
-            DirectionalValue = -1;
-
-            if (canFlip)
+            if (leftArrowButton && !rightArrowButton)
             {
-                //Flips the sprite
-                sp.flipX = true;
+                DirectionalValue = -1;
+
+                if (canFlip)
+                {
+                    // Flips the sprite
+                    sp.flipX = true;
+                }
+
             }
-     
-        }
-        else if (!leftArrowButton && rightArrowButton)
-        {
-            DirectionalValue = 1;
-
-            if (canFlip)
+            else if (!leftArrowButton && rightArrowButton)
             {
-                //Flips the sprite
-                sp.flipX = false;
+                DirectionalValue = 1;
+
+                if (canFlip)
+                {
+                    // Flips the sprite
+                    sp.flipX = false;
+                }
+            }
+            else
+            {
+                DirectionalValue = 0;
             }
         }
         else
         {
-            DirectionalValue = 0;
+            if (mouseDirectionX > 0)
+            {
+                if (canFlip)
+                {
+                    // Flips the sprite
+                    sp.flipX = false;
+                }
+            }
+            else if (mouseDirectionX < 0)
+            {
+                if (canFlip)
+                {
+                    // Flips the sprite
+                    sp.flipX = true;
+                }
+            }
+
+            if (leftArrowButton && !rightArrowButton)
+            {
+                DirectionalValue = -1;
+            }
+            else if (!leftArrowButton && rightArrowButton)
+            {
+                DirectionalValue = 1;
+            }
+            else
+            {
+                DirectionalValue = 0;
+            }
         }
 
         if (canMove)
         {
-            // Gravity
-            GravityPhysics();
-
-            // Jump
-            JumpPhysics();
+            if (DoubleJumpGlitch)
+            {
+                DoubleJumpPhysics();
+            }
+            else
+            {
+                // Jump
+                JumpPhysics();
+            }
 
             // Left-Right Movement
             DirectionalPhysics();
 
-            // Dash
-            DashPhysics();
+            if (!JumpDashMomentumGlitch && ableToDash)
+            {
+                // Dash
+                DashPhysics();
+            }
+            else
+            {
+                if (ableToDash)
+                {
+                    JumpDashPhysics();
+                    // Jump + Dash
+                    JumpDashFrictionPhysics();
+                }
+
+            }
 
             // Crouch
             CrouchPhysics();
 
-            // Friction
-            FrictionPhysics();
-
             // Grabbed Object
-            GrabPhysics();
+            GrabPhysics(BoxFlyGlitch);
 
             // Glitch Through Walls
             WallGlitch();
 
             // Glitch Through walls with object
             GrabGlitch();
+
+            if (BoxSquish)
+            {
+                GrabGlitchSquish();
+            }
+
         }
 
+        if (!JumpDashMomentumGlitch)
+        {
+            // Friction
+            FrictionPhysics();
+        }
+
+        // Gravity
+        GravityPhysics();
+
+    }
+    void OnDrawGizmos()
+    {
+        Vector3 position = rayPoint; // Replace with your desired position
+        Gizmos.color = Color.red;
+        Gizmos.DrawSphere(position, 0.1f);
+
+        Vector3 position2 = grabPoint; // Replace with your desired position
+        Gizmos.color = Color.blue;
+        Gizmos.DrawSphere(position2, 0.1f);
     }
 
     // Gravity Physics
@@ -446,7 +585,7 @@ public class PlayerMovement : MonoBehaviour
             }
 
             // Setting Jump Force in "y" direction as well as a little boost in "x" if allowed to give it more dynamisme
-            Player.AddForce(new Vector2(0, jumpForce), ForceMode2D.Impulse);
+            Player.AddForce(new Vector2(0, jumpForce * (jumpCount + 1)), ForceMode2D.Impulse);
 
             // Setting the "Coyote" and "JumpBuffer" timers back to 0
             jumpBufferTimeCounter = ConditionalTimerDuration(jumpBufferTimeCounter, 0, true);
@@ -477,7 +616,7 @@ public class PlayerMovement : MonoBehaviour
     // Left And Right Physics
     void DirectionalPhysics()
     {
-        if (DirectionalValue != 0)
+        if (DirectionalValue != 0 && canMove)
         {
             // Calculate the acceleration based on the difference between current velocity and top velocity
             float acceleration = Mathf.Pow(Mathf.Abs(DirectionalValue * PlayerTopSpeed - Player.velocity.x), PowerCoefficient) * accelerationFactor;
@@ -600,7 +739,37 @@ public class PlayerMovement : MonoBehaviour
             }
         }
     }
+    void JumpDashPhysics()
+    {
+        if (holdingDashButton && canDash)
+        {
+            //Dash SFX
+            AudioClip dashClip = dashAudioClips[Random.Range(0, dashAudioClips.Count)];
+            dashAudioSource.clip = dashClip;
+            dashAudioSource.Play();
 
+            //Dash VFX
+            DashParticles.Play();
+            DashVFX.Play();
+
+            DashDirection = new Vector2(mouseDirectionX, mouseDirectionY).normalized;
+            DashTimeCounter = ConditionalTimerDuration(DashTimeCounter, DashTime, true);
+            canDash = false;
+        }
+
+        if (isDashing && hasJumped && Player.velocity.y > jumpForce - 1f)
+        {
+            Player.velocity = jumpDashSpeedCoef * DashDirection * DashVelocity;
+            hasDashed = true;
+            JumpDashActive = true;
+        }
+        else if (isDashing)
+        {
+            Player.velocity = DashDirection * DashVelocity;
+            hasDashed = true;
+            JumpDashActive = false;
+        }
+    }
     void JumpDashFrictionPhysics()
     {
         if (!leftArrowButton && !rightArrowButton)
@@ -626,65 +795,118 @@ public class PlayerMovement : MonoBehaviour
     }
 
     // Grabbing
-    private void GrabPhysics()
+    private void GrabPhysics(bool glitched)
     {
-        RaycastHit2D hitInfo;
-
-        if (Player.velocity.x != 0)
+        if (!isGrabbing)
         {
-            hitInfo = Physics2D.Raycast(rayPoint.position, new Vector3(DirectionalValue, 0, 0), rayDistance, GrabbableLayer);
-        }
-        else
-        {
-            hitInfo = Physics2D.Raycast(rayPoint.position, new Vector3(transform.localScale.x, 0, 0), rayDistance, GrabbableLayer);
+            hitInfo = Physics2D.Raycast(rayPoint, mouseDirection, rayDistance, GrabbableLayer);
         }
 
-        if (hitInfo.collider != null)
+        if ((hitInfo.collider != null || isGrabbing) && !throwCooldown)
         {
             // Grab Object
-            if (mouseLeftButton)
+            if (mouseRightButton && grabbedObject != null)
             {
+                Rigidbody2D grabbedObjectRigidbody = grabbedObject.GetComponent<Rigidbody2D>();
+                grabbedObjectRigidbody.isKinematic = false;
+
+                Vector2 throwDirection = new Vector2(mouseDirectionX, mouseDirectionY).normalized;
+
+                // Adjust player velocity to prevent obstruction of object repelling
+                if (Mathf.Sign(Player.velocity.x) == Mathf.Sign(throwDirection.x))
+                {
+                    Player.velocity = new Vector2(0f, Player.velocity.y);
+                }
+
+                if (Mathf.Sign(Player.velocity.y) == Mathf.Sign(throwDirection.y))
+                {
+                    Player.velocity = new Vector2(Player.velocity.x, 0f);
+                }
+
+                // Throw the object
+                grabbedObjectRigidbody.velocity = PolarVector3(15f, Mathf.Atan2(mouseDirectionY, mouseDirectionX));
+
+                // Apply a force to the player in the opposite direction
+                float throwForceMagnitude = 15f;
+                Vector2 playerThrowForce = PolarVector3(-0.5f * throwForceMagnitude, Mathf.Atan2(mouseDirectionY, mouseDirectionX));
+                Player.AddForce(playerThrowForce, ForceMode2D.Impulse);
+
+                // Detect the throw
+                thrownObject = true;
+                thrownReaction = playerThrowForce;
+
+                // Put delay on regrab
+                throwCooldownCounter = ConditionalTimerDuration(throwCooldownCounter, throwCooldownDuration, true);
+
+                isGrabbing = false;
+                hasDashed = false;
+                grabbedObject.transform.SetParent(null);
+                grabbedObject = null;
+
+                if (!glitched)
+                {
+                    // Make sure to not ignore layer now that it's not grabbed
+                    Physics2D.IgnoreLayerCollision(LayerMask.NameToLayer("PlayerLayer"), LayerMask.NameToLayer("GrabbableObject"), false);
+                }
+
+            }
+            else if (mouseLeftButton)
+            {
+                if (!glitched)
+                {
+                    // Make sure to ignore layer of object to prevent collisions between them
+                    Physics2D.IgnoreLayerCollision(LayerMask.NameToLayer("PlayerLayer"), LayerMask.NameToLayer("GrabbableObject"), true);
+                }
+
                 grabbedObject = hitInfo.collider.gameObject;
                 grabbedObject.GetComponent<Rigidbody2D>().isKinematic = true;
-                grabbedObject.transform.position = grabPoint.position;
-                grabbedObject.transform.SetParent(transform);
+
+                // !!! ADD ALSO TRAVERSABLE OBJECTS, UNLESS IT'S A GLITCH
+                if (Physics2D.OverlapBox(grabPoint, grabbedObject.GetComponent<BoxCollider2D>().bounds.size, 0f, nonTraversableObstacle) == null)
+                {
+                    grabbedObject.transform.position = grabPoint;
+                    grabbedObject.transform.SetParent(transform);
+                    isGrabbing = true;
+                }
+                else
+                {
+                    grabbedObject.GetComponent<Rigidbody2D>().isKinematic = false;
+                    isGrabbing = false;
+                    hasDashed = false;
+                    grabbedObject.transform.SetParent(null);
+                    grabbedObject = null;
+
+                    if (!glitched)
+                    {
+                        // Make sure to not ignore layer now that it's not grabbed
+                        Physics2D.IgnoreLayerCollision(LayerMask.NameToLayer("PlayerLayer"), LayerMask.NameToLayer("GrabbableObject"), false);
+                    }
+
+                }
+
+
             }
             else if (!mouseLeftButton && grabbedObject != null)
             {
                 Rigidbody2D grabbedObjectRigidbody = grabbedObject.GetComponent<Rigidbody2D>();
                 grabbedObjectRigidbody.isKinematic = false;
 
-                if (!(downArrowButton && onGround))
-                {
-                    Vector2 throwDirection = new Vector2(mouseDirectionX, mouseDirectionY).normalized;
-
-                    // Adjust player velocity to prevent obstruction of object repelling
-                    if (Mathf.Sign(Player.velocity.x) == Mathf.Sign(throwDirection.x))
-                    {
-                        Player.velocity = new Vector2(0f, Player.velocity.y);
-                    }
-
-                    if (Mathf.Sign(Player.velocity.y) == Mathf.Sign(throwDirection.y))
-                    {
-                        Player.velocity = new Vector2(Player.velocity.x, 0f);
-                    }
-
-                    // Throw the object
-                    grabbedObjectRigidbody.velocity = PolarVector(15f, Mathf.Atan2(mouseDirectionY, mouseDirectionX));
-
-                    // Apply a force to the player in the opposite direction
-                    float throwForceMagnitude = 15f;
-                    Vector2 playerThrowForce = PolarVector(-0.5f * throwForceMagnitude, Mathf.Atan2(mouseDirectionY, mouseDirectionX));
-                    Player.AddForce(playerThrowForce, ForceMode2D.Impulse);
-
-                    // Detect the throw
-                    thrownObject = true;
-                    thrownReaction = playerThrowForce;
-                }
-
+                isGrabbing = false;
                 hasDashed = false;
                 grabbedObject.transform.SetParent(null);
                 grabbedObject = null;
+
+                // LeftObject Glitch
+                leftObject = true;
+                leftDirection = mouseDirection.y;
+                leftObjectThresholdCounter = ConditionalTimerDuration(leftObjectThresholdCounter, leftObjectThresholdDuration, true);
+                leftObjectThreshold = CheckCondition(leftObjectThresholdCounter, leftObjectThreshold);
+
+                if (!glitched)
+                {
+                    // Make sure to not ignore layer now that it's not grabbed
+                    Physics2D.IgnoreLayerCollision(LayerMask.NameToLayer("PlayerLayer"), LayerMask.NameToLayer("GrabbableObject"), false);
+                }
             }
         }
     }
@@ -714,19 +936,23 @@ public class PlayerMovement : MonoBehaviour
     // Grab Glitch
     void GrabGlitch()
     {
-        if (thrownObject && CheckRay(playerCollider.bounds.center, new Vector2(thrownReaction.x, 0).normalized, 0.7f, nonTraversableObstacle) && onGround)
+        if (thrownObject && CheckRay(playerCollider.bounds.center, new Vector2(thrownReaction.x, 0).normalized, 0.7f, TraversableObstacle) && onGround)
         {
             Vector2 ClipPosition = new Vector2(playerCollider.bounds.center.x, playerCollider.bounds.center.y + 0.1f) + new Vector2(thrownReaction.x, 0).normalized * ClipDistance;
 
-            while (!CheckCollision(ClipPosition - new Vector2(thrownReaction.x, 0).normalized * Time.fixedDeltaTime, Vector2.zero, 0f, nonTraversableObstacle))
+            while (!CheckCollision(ClipPosition - new Vector2(thrownReaction.x, 0).normalized * Time.fixedDeltaTime, Vector2.zero, 0f, TraversableObstacle))
             {
                 ClipPosition -= new Vector2(thrownReaction.x, 0).normalized * Time.fixedDeltaTime;
             }
 
             ClipPosition += new Vector2(thrownReaction.x, 0).normalized * Time.fixedDeltaTime;
 
-            if (!CheckCollision(ClipPosition, Vector2.zero, 0f, nonTraversableObstacle))
+            if (!CheckCollision(ClipPosition, Vector2.zero, 0f, TraversableObstacle))
             {
+                hasGrabGlitched = true;
+                canFlip = false;
+                canMove = false;
+                StartCoroutine(NextLevelTransition(8));
                 transform.position = ClipPosition;
                 Player.velocity = new Vector2(thrownReaction.x, 0).normalized * AfterClipVelocity;
             }
@@ -742,9 +968,44 @@ public class PlayerMovement : MonoBehaviour
             thrownReaction = Vector2.zero;
         }
     }
+
+    // Grab Glitch Squish
+    void GrabGlitchSquish()
+    {
+        if (leftObject && CheckCollision(playerCollider.bounds.center, Vector2.up, 0.1f, GrabbableLayer) && onGround && leftDirection >= 0.92f)
+        {
+            Vector2 ClipPosition = new Vector2(playerCollider.bounds.center.x, playerCollider.bounds.center.y) + Vector2.down * ClipDistanceSquish;
+
+            while (!CheckCollision(ClipPosition - Vector2.down * Time.fixedDeltaTime, Vector2.zero, 0f, TraversableObstacle))
+            {
+                ClipPosition -= Vector2.down * Time.fixedDeltaTime;
+            }
+
+            ClipPosition += Vector2.down * Time.fixedDeltaTime;
+
+            if (!CheckCollision(ClipPosition, Vector2.zero, 0f, TraversableObstacle))
+            {
+                BoxSquish = false;
+                StartCoroutine(NextLevelTransition(7));
+                transform.position = ClipPosition;
+                Player.velocity = Vector2.down * AfterClipVelocity;
+            }
+            else
+            {
+                leftObject = false;
+                leftDirection = 0f;
+            }
+        }
+
+        if (!leftObjectThreshold)
+        {
+            leftObject = false;
+            leftDirection = 0f;
+        }
+    }
     public void isGrounded() // GROUND CHECK
     {
-        Ground = Physics2D.BoxCast(playerCollider.bounds.center, playerCollider.bounds.size, 0f, Vector2.down, .2f, nonTraversableObstacle);;
+        Ground = Physics2D.BoxCast(playerCollider.bounds.center, playerCollider.bounds.size, 0f, Vector2.down, .2f, nonTraversableObstacle); ;
 
         if (Ground)
         {
@@ -788,10 +1049,11 @@ public class PlayerMovement : MonoBehaviour
     }
 
     // Angeled Vector
-    Vector2 PolarVector(float magnitude, float angle)
+    Vector3 PolarVector3(float magnitude, float angle)
     {
-        return magnitude * new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+        return magnitude * new Vector3(Mathf.Cos(angle), Mathf.Sin(angle), 0);
     }
+
     // Generalized GIGACHAD Timers :)
 
     float ConditionalTimerDuration(float TimerCounter, float Duration, bool Condition)
@@ -824,7 +1086,7 @@ public class PlayerMovement : MonoBehaviour
 
         return Condition;
     }
-    
+
     //Called in the Animator
     public void playStepParticles()
     {
@@ -832,7 +1094,7 @@ public class PlayerMovement : MonoBehaviour
         stepDust.transform.parent = null;
         stepDust.Play();
     }
-    public IEnumerator Death(float time)
+    public IEnumerator Death(float time, bool nextLevel)
     {
         anim.SetTrigger("Dead");
 
@@ -845,10 +1107,29 @@ public class PlayerMovement : MonoBehaviour
         canFlip = false;
 
         Player.simulated = false;
-
+ 
         yield return new WaitForSeconds(time);
 
         transform.position = gm.lastCheckPointPos;
+        if (nextLevel)
+        {
+            dialog.textDisplay.text = "";
+        }
+
+        for (int i = 0; i < gm.crates.Count; i++)
+        {
+            gm.crates[i].transform.position = gm.cratesOriginPosition[i];
+        }
+        Room10ValidationPlatform.hasEntered = false;
+        Room10JumpDashGlitch.hasJumpDashed = false;
+
+        if (nextLevel)
+        {
+            dialog.textDisplay.text = "";
+            dialog.NextSentence();
+            StartCoroutine(ShowNextMessage());
+
+        }
 
         isDead = false;
 
@@ -856,8 +1137,32 @@ public class PlayerMovement : MonoBehaviour
 
         canFlip = true;
 
+        Player.sharedMaterial.friction = 0;
+
         Player.simulated = true;
 
         loadingScreen.SetActive(false);
+
+    }
+    IEnumerator NextLevelTransition(int level)
+    {
+        yield return new WaitForSeconds(2f);
+        StartCoroutine(GameObject.FindGameObjectWithTag("Player").GetComponent<PlayerMovement>().Death(2.0f, true));
+        gm.lastCheckPointPos = spawnPoints[level - 1].position;
+        loadingScreen.SetActive(true);
+
+        if (dashSpeedGlitch)
+        {
+            dashSpeedGlitch = false;
+        }
+
+    }
+
+    IEnumerator ShowNextMessage()
+    {
+        yield return new WaitForSeconds(1.2f);
+        dialog.textDisplay.text = "";
+        StartCoroutine(dialog.Type());
+
     }
 }

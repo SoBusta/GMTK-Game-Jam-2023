@@ -5,6 +5,8 @@ TagManager:
   serializedVersion: 2
   tags:
   - GM
+  - GrabbableObject
+  - MesageField
   layers:
   - Default
   - TransparentFX
@@ -15,8 +17,8 @@ TagManager:
   - Ground
   - GrabbableObject
   - Death
-  - 
-  - 
+  - PlayerLayer
+  - Traversable
   - 
   - 
   - 

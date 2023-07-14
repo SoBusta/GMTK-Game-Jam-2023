@@ -10,13 +10,22 @@ public class RoomManager : MonoBehaviour
 
     [SerializeField] private List<GameObject> objectsToActivate;
 
+    [SerializeField] private Dialog dialog;
+
+    [SerializeField] private bool TextRoom;
+
+    [SerializeField] private bool nextTextRoom;
+
+    [SerializeField] private GameObject loadingScreen;
+
+
     private void OnTriggerEnter2D(Collider2D other)
     {
         if (other.CompareTag("Player") && !other.isTrigger)
         {
             virtualCam.SetActive(true);
             virtualCam.GetComponent<CinemachineConfiner>().enabled = true;
-
+         
             foreach (GameObject obj in objectsToActivate)
             {
                 if (obj != null)
@@ -34,7 +43,6 @@ public class RoomManager : MonoBehaviour
         if (other.CompareTag("Player") && !other.isTrigger)
         {
             virtualCam.SetActive(false);
-
 
         }
     }

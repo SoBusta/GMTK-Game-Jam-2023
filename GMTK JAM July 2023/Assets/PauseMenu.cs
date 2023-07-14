@@ -67,7 +67,7 @@ public class PauseMenu : MonoBehaviour
     public void RestartLevel()
     {
         Resume();
-        StartCoroutine(player.GetComponent<PlayerMovement>().Death(0.6f));
+        StartCoroutine(player.GetComponent<PlayerMovement>().Death(0.6f, false));
     }
 
 }

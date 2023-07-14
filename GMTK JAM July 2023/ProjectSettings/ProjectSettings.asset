@@ -13,7 +13,7 @@ PlayerSettings:
   useOnDemandResources: 0
   accelerometerFrequency: 60
   companyName: DefaultCompany
-  productName: GMTK JAM July 2023
+  productName: GameBreaking!
   defaultCursor: {fileID: 2800000, guid: fc1adf23de7ce1d41807464b2d7b3536, type: 3}
   cursorHotspot: {x: 0, y: 0}
   m_SplashScreenBackgroundColor: {r: 0.13725491, g: 0.12156863, b: 0.1254902, a: 1}
